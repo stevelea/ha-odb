@@ -137,8 +137,9 @@ void OBDComponent::loop() {
       break;
 
     case PollState::SCANNING:
-      // Wait for our 15s scan to complete (non-blocking poll)
-      if (!NimBLEDevice::getScan()->isScanning() || now - state_start_ms_ > 20000) {
+      // Wait at least 1s for scan to start, then poll isScanning() up to 20s
+      if (now - state_start_ms_ > 1000 && 
+          (!NimBLEDevice::getScan()->isScanning() || now - state_start_ms_ > 20000)) {
         if (connect_ble()) {
           state_ = PollState::DISCOVERING;
         } else {
