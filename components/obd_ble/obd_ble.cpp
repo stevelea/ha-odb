@@ -251,7 +251,7 @@ void OBDComponent::start_scan() {
   scan->setActiveScan(true);
   scan->setInterval(80);
   scan->setWindow(80);
-  scan->start(15000, false, true);  // 15s non-continuing
+  scan->start(15, false, true);  // 15 seconds (NimBLE duration is in seconds)
   ESP_LOGD(TAG, "BLE scan started (15s)...");
 }
 
