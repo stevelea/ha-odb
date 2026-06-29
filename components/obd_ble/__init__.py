@@ -116,9 +116,10 @@ async def to_code(config):
 
     # Create sensors from PID definitions (Python generates them with ESPHome API)
     if config[CONF_PROFILE] == "xpeng_g6":
-        for name, unit, dev_cls, state_cls, icon in G6_PIDS:
+        for i, (name, unit, dev_cls, state_cls, icon) in enumerate(G6_PIDS):
             sens = await sensor.new_sensor(
                 {
+                    CONF_ID: cg.new_id(f"obd_sensor_{i}"),
                     "name": f"obd_{name}",
                     "unit_of_measurement": unit or None,
                     "device_class": dev_cls or None,
