@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <esp_gattc_api.h>
 
 namespace esphome {
 namespace obd_ble {
@@ -67,29 +68,31 @@ void OBDComponent::dump_config(){
 
 // ── BLEClientNode callbacks ───────────────────────────────────────────
 
-void OBDComponent::on_connect(){
-  ESP_LOGI(TAG,"BLE connected! Looking up characteristics...");
-  // Find the write characteristic handle via ble_client
-  auto* chr=ble_client_->get_characteristic(ble_client::BLEUUID(WRITE_CHAR_UUID),
-                                             ble_client::BLEUUID("0000fff0-0000-1000-8000-00805f9b34fb"));
-  if(chr){write_handle_=chr->handle;ESP_LOGI(TAG,"Write char handle: %d",write_handle_);}
-  else{ESP_LOGW(TAG,"Write characteristic not found");return;}
-
-  // Subscribe to notify characteristic
-  auto* notify=ble_client_->get_characteristic(ble_client::BLEUUID(NOTIFY_CHAR_UUID),
-                                                ble_client::BLEUUID("0000fff0-0000-1000-8000-00805f9b34fb"));
-  if(notify){ble_client_->subscribe_characteristic(notify);ESP_LOGI(TAG,"Subscribed to notify char");}
-  start_init();
-}
-
-void OBDComponent::on_disconnect(){
-  ESP_LOGI(TAG,"BLE disconnected");
-  write_handle_=0; init_done_=false; state_=PollState::IDLE;
-}
-
 void OBDComponent::gattc_event_handler(esp_gattc_cb_event_t event,esp_gatt_if_t gattc_if,esp_ble_gattc_cb_param_t* param){
-  if(event==ESP_GATTC_NOTIFY_EVT){
-    process_notify(param->notify.value,param->notify.value_len);
+  switch(event){
+    case ESP_GATTC_CONNECT_EVT:
+      ESP_LOGI(TAG,"BLE connected! Looking up characteristics...");
+      {
+        // Find write characteristic handle
+        auto* chr=ble_client_->get_characteristic(
+          esphome::esp32_ble::ESPBTUUID::from_string(WRITE_CHAR_UUID),
+          esphome::esp32_ble::ESPBTUUID::from_string("0000fff0-0000-1000-8000-00805f9b34fb"));
+        if(chr){write_handle_=chr->handle;ESP_LOGI(TAG,"Write handle: %d",write_handle_);}
+        else{ESP_LOGW(TAG,"Write char not found");}
+      }
+      break;
+    case ESP_GATTC_DISCONNECT_EVT:
+      ESP_LOGI(TAG,"BLE disconnected");
+      write_handle_=0; init_done_=false; state_=PollState::IDLE;
+      break;
+    case ESP_GATTC_REG_FOR_NOTIFY_EVT:
+      ESP_LOGI(TAG,"Notify subscribed");
+      start_init();
+      break;
+    case ESP_GATTC_NOTIFY_EVT:
+      process_notify(param->notify.value,param->notify.value_len);
+      break;
+    default:break;
   }
 }
 
@@ -103,7 +106,7 @@ void OBDComponent::start_init(){
 // ── update / loop ─────────────────────────────────────────────────────
 
 void OBDComponent::update(){
-  if(state_==PollState::IDLE&&init_done_&&ble_client_&&ble_client_->is_connected()){
+  if(state_==PollState::IDLE&&init_done_&&ble_client_&&ble_client_->connected){
     poll_cycle_++;current_pid_index_=0;bms_done_=false;state_=PollState::POLL_BMS;state_start_ms_=millis();}
 }
 
@@ -138,13 +141,15 @@ void OBDComponent::loop(){
 bool OBDComponent::send_at_command(const std::string& cmd){
   if(!ble_client_||write_handle_==0)return false;
   std::string p=cmd+"\r";
-  ble_client_->write_characteristic(write_handle_,(uint8_t*)p.c_str(),p.length());
+  esp_ble_gattc_write_char(ble_client_->get_gattc_if(),ble_client_->get_conn_id(),
+    write_handle_,p.length(),(uint8_t*)p.c_str(),ESP_GATT_WRITE_TYPE_NO_RSP,ESP_GATT_AUTH_REQ_NONE);
   return true;
 }
 bool OBDComponent::send_obd_query(const std::string& pid){
   if(!ble_client_||write_handle_==0)return false;
   std::string p="22 "+pid+"\r";
-  ble_client_->write_characteristic(write_handle_,(uint8_t*)p.c_str(),p.length());
+  esp_ble_gattc_write_char(ble_client_->get_gattc_if(),ble_client_->get_conn_id(),
+    write_handle_,p.length(),(uint8_t*)p.c_str(),ESP_GATT_WRITE_TYPE_NO_RSP,ESP_GATT_AUTH_REQ_NONE);
   return true;
 }
 void OBDComponent::switch_ecu_header(const std::string& ecu){
