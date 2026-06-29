@@ -75,8 +75,8 @@ void OBDComponent::gattc_event_handler(esp_gattc_cb_event_t event,esp_gatt_if_t 
       {
         // Find write characteristic handle
         auto* chr=ble_client_->get_characteristic(
-          esphome::esp32_ble::ESPBTUUID::from_string(WRITE_CHAR_UUID),
-          esphome::esp32_ble::ESPBTUUID::from_string("0000fff0-0000-1000-8000-00805f9b34fb"));
+          esphome::esp32_ble::ESPBTUUID(WRITE_CHAR_UUID),
+          esphome::esp32_ble::ESPBTUUID("0000fff0-0000-1000-8000-00805f9b34fb"));
         if(chr){write_handle_=chr->handle;ESP_LOGI(TAG,"Write handle: %d",write_handle_);}
         else{ESP_LOGW(TAG,"Write char not found");}
       }
@@ -106,7 +106,7 @@ void OBDComponent::start_init(){
 // ── update / loop ─────────────────────────────────────────────────────
 
 void OBDComponent::update(){
-  if(state_==PollState::IDLE&&init_done_&&ble_client_&&ble_client_->connected){
+  if(state_==PollState::IDLE&&init_done_&&ble_client_&&ble_client_->connected()){
     poll_cycle_++;current_pid_index_=0;bms_done_=false;state_=PollState::POLL_BMS;state_start_ms_=millis();}
 }
 
