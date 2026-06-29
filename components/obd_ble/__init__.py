@@ -30,7 +30,7 @@ import esphome.config_validation as cv
 from esphome.components import sensor
 from esphome.const import CONF_ID
 
-DEPENDENCIES = ["esp32", "esp32_ble", "esp32_ble_tracker"]
+DEPENDENCIES = ["esp32"]
 AUTO_LOAD = ["sensor"]
 
 obd_ble_ns = cg.esphome_ns.namespace("obd_ble")
@@ -99,6 +99,12 @@ CONFIG_SCHEMA = cv.Schema(
 
 async def to_code(config):
     """Create the C++ component from config and generate sensors."""
+    # Use NimBLE-Arduino 1.4.1 (compatible with ESP-IDF 5.x, no lib conflict)
+    cg.add_library("h2zero/NimBLE-Arduino", "1.4.1")
+    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_ADVERTISEMENT=0")
+    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_GAP=1")
+    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_GATT_CLIENT=1")
+    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_USE_ESP_IDF_NIMBLE=1")
 
     # Create the main component
     var = cg.new_Pvariable(config[CONF_ID])
