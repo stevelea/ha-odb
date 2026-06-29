@@ -17,8 +17,6 @@
 #include "mqtt.h"
 #include <ArduinoJson.h>
 #include <helper.h>
-#include <MQTTWebSocketStreamClient.h>
-
 #include <utility>
 
 MQTTSubscription::MQTTSubscription(const std::string &field, const std::string &topic) {
@@ -83,7 +81,7 @@ void MQTT::addSubscription(const std::string &field, const std::string &topic) {
     }
 }
 
-MQTT::MQTT() : client(nullptr), wsClient(nullptr), wsStreamClient(nullptr) {
+MQTT::MQTT() : client(nullptr) {
     mqtt.setKeepAlive(MQTT_KEEPALIVE);
     mqtt.setBufferSize(MQTT_MAX_PACKET_SIZE);
 }
@@ -94,14 +92,8 @@ void MQTT::setClient(Client *client) {
 
 bool MQTT::connect(const char *clientId, const char *broker, const unsigned int port, const char *username,
                    const char *password, mqttProtocol protocol, int conTimeout) {
-    if (protocol == USE_MQTT) {
-        mqtt.setClient(*client);
-        mqtt.setServer(broker, port);
-    } else {
-        wsClient = new MQTTWebSocketClient(*client, broker, port);
-        wsStreamClient = new MQTTWebSocketStreamClient(*wsClient, "/");
-        mqtt.setClient(*wsStreamClient);
-    }
+    mqtt.setClient(*client);
+    mqtt.setServer(broker, port);
 
     mqtt.setCallback([&](char *topic, byte *payload, unsigned int length) {
         this->callback(topic, payload, length);

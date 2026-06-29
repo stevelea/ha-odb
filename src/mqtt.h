@@ -19,8 +19,7 @@
 #include <PubSubClient.h>
 #include <regex>
 #include <string>
-#include <MQTTWebSocketClient.h>
-#include <MQTTWebSocketStreamClient.h>
+#include <WiFiClient.h>
 
 #ifndef BUILD_GIT_BRANCH
 #define BUILD_GIT_BRANCH ""
@@ -71,8 +70,6 @@ public:
 class MQTT {
     Client *client;
     PubSubClient mqtt;
-    MQTTWebSocketClient *wsClient;
-    MQTTWebSocketStreamClient *wsStreamClient;
 
     int numReconnects = -1;
     std::string maintopic = "obd2mqtt";
