@@ -114,7 +114,7 @@ async def to_code(config):
     cg.add(var.set_mac_address(cg.RawExpression(f'"{mac_clean}"')))
     cg.add(var.set_profile(config[CONF_PROFILE]))
 
-    # Create sensors from PID definitions via raw codegen
+    # Create sensors — minimal codegen, no property setters (not available in C++ API)
     sensor_type = cg.esphome_ns.namespace("sensor").class_("Sensor")
     from esphome.core import ID
 
@@ -122,14 +122,4 @@ async def to_code(config):
         for i, (name, unit, dev_cls, state_cls, icon) in enumerate(G6_PIDS):
             sid = ID(f"obd_sensor_{i}", is_declaration=True, type=sensor_type)
             sens = cg.new_Pvariable(sid)
-            cg.add(cg.App.register_component(sens))
-            cg.add(sens.set_name(f"obd_{name}"))
-            if unit:
-                cg.add(sens.set_unit_of_measurement(unit))
-            if dev_cls:
-                cg.add(sens.set_device_class(dev_cls))
-            if state_cls:
-                cg.add(sens.set_state_class(state_cls))
-            if icon:
-                cg.add(sens.set_icon(icon))
             cg.add(var.add_sensor(sens))
