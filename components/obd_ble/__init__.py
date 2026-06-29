@@ -121,7 +121,7 @@ async def to_code(config):
     if config[CONF_PROFILE] == "xpeng_g6":
         for i, (name, unit, dev_cls, state_cls, icon) in enumerate(G6_PIDS):
             sid = ID(f"obd_sensor_{i}", is_declaration=True, type=sensor_type)
-            sens = cg.Pvariable(sid)
+            sens = cg.new_Pvariable(sid)
             cg.add(cg.App.register_component(sens))
             cg.add(sens.set_name(f"obd_{name}"))
             if unit:
