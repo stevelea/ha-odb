@@ -239,8 +239,18 @@ void OBDComponent::loop() {
 bool OBDComponent::connect_ble() {
   ESP_LOGI(TAG, "Scanning for %s...", mac_address_.c_str());
 
+  // Stop ESPHome's continuous scan temporarily so we can run our own
   NimBLEScan* scan = NimBLEDevice::getScan();
-  NimBLEScanResults results = scan->getResults(10000);  // 10s scan
+  scan->stop();
+  delay(100);
+
+  // Start a dedicated 15-second active scan
+  scan->setActiveScan(true);
+  scan->setInterval(80);
+  scan->setWindow(80);
+  NimBLEScanResults results = scan->start(15, nullptr, false);  // blocking 15s
+
+  ESP_LOGI(TAG, "Scan complete: %d device(s) found", results.getCount());
 
   // Normalise MAC: strip colons, lowercase for comparison
   std::string target_mac = mac_address_;
@@ -252,14 +262,23 @@ bool OBDComponent::connect_ble() {
   for (int i = 0; i < results.getCount(); i++) {
     device = results.getDevice(i);
     std::string addr = device->getAddress().toString();
+    std::string name = device->haveName() ? device->getName() : "(no name)";
+    int rssi = device->getRSSI();
+
+    ESP_LOGD(TAG, "  [%d] %s  %s  RSSI=%d", i, addr.c_str(), name.c_str(), rssi);
+
     addr.erase(std::remove(addr.begin(), addr.end(), ':'), addr.end());
     std::transform(addr.begin(), addr.end(), addr.begin(), ::tolower);
     if (addr == target_mac) {
-      ESP_LOGI(TAG, "Match found: %s (index %d)", device->getName().c_str(), i);
+      ESP_LOGI(TAG, "*** MATCH: %s (RSSI=%d)", name.c_str(), rssi);
       break;
     }
     device = nullptr;
   }
+
+  // Restart ESPHome's continuous scan
+  scan->start(0, nullptr, false);  // continuous scan with default params
+  delay(50);
 
   if (device == nullptr) {
     ESP_LOGW(TAG, "Device %s not found in scan results", mac_address_.c_str());
