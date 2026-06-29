@@ -244,11 +244,11 @@ bool OBDComponent::connect_ble() {
 
   NimBLEAdvertisedDevice* device = nullptr;
   for (int i = 0; i < results.getCount(); i++) {
-    auto dev = results.getDevice(i);
-    if (dev.getAddress().toString() == mac_address_) {
-      device = &dev;
+    device = results.getDevice(i);
+    if (device->getAddress().toString() == mac_address_) {
       break;
     }
+    device = nullptr;
   }
 
   if (device == nullptr) {
