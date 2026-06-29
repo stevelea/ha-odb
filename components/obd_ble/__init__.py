@@ -115,9 +115,6 @@ async def to_code(config):
     cg.add(var.set_profile(config[CONF_PROFILE]))
 
     # Create sensors from PID definitions (Python generates them with ESPHome API)
-    sensors_vec = cg.std_vector(cg.esphome_ns.namespace("sensor").class_("Sensor").operator("ptr"))
-    sensor_count = cg.new_variable(cg.uint32, 0, cg.RawExpression("0"))
-
     if config[CONF_PROFILE] == "xpeng_g6":
         for name, unit, dev_cls, state_cls, icon in G6_PIDS:
             sens = await sensor.new_sensor(
@@ -129,8 +126,4 @@ async def to_code(config):
                     "icon": icon or None,
                 }
             )
-            cg.add(sensors_vec.push_back(sens))
-            cg.add(sensor_count.assign(cg.RawExpression(f"{sensor_count} + 1")))
-
-    # Pass sensor list to C++ component
-    cg.add(var.set_sensors(sensors_vec, sensor_count))
+            cg.add(var.add_sensor(sens))

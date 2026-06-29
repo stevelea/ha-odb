@@ -44,9 +44,9 @@ class OBDComponent : public PollingComponent {
 
   void set_mac_address(const std::string& mac) { mac_address_ = mac; }
   void set_profile(const std::string& profile) { profile_ = profile; }
-  void set_sensors(std::vector<sensor::Sensor*> sensors, uint32_t count) {
-    sensors_ = std::move(sensors);
-    last_values_.resize(count, NAN);
+  void add_sensor(sensor::Sensor* sens) {
+    sensors_.push_back(sens);
+    last_values_.push_back(NAN);
   }
 
   void setup() override;
