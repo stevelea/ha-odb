@@ -76,8 +76,16 @@ bool OBDComponent::check_tracker(){
   for(size_t i=0;i<m.length()&&j<6;i+=2){int hi=(m[i]>='a'?m[i]-'a'+10:m[i]>='A'?m[i]-'A'+10:m[i]-'0');
     int lo=(m[i+1]>='a'?m[i+1]-'a'+10:m[i+1]>='A'?m[i+1]-'A'+10:m[i+1]-'0');t[j++]=(hi<<4)|lo;}
 
-  // Use NimBLE directly — tracker's scan results are in the same buffer
-  NimBLEScanResults r=NimBLEDevice::getScan()->getResults();
+  // Stop tracker scan, run our own 5s scan, then resume tracker
+  NimBLEScan* scan=NimBLEDevice::getScan();
+  scan->stop();delay(50);
+  scan->setActiveScan(true);scan->setInterval(80);scan->setWindow(80);
+  scan->start(5,false,true);  // 5-second scan
+  delay(5200);                 // wait for completion
+  NimBLEScanResults r=scan->getResults();
+  scan->start(0,true,true);   // resume continuous scan
+  ESP_LOGI(TAG,"Scan: %d device(s)",r.getCount());
+
   for(int i=0;i<r.getCount();i++){
     auto d=r.getDevice(i);
     auto addr=d.getAddress().getNative();
