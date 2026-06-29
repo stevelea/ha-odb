@@ -160,12 +160,12 @@ bool OBDComponent::process_scan(){
   std::transform(tm.begin(),tm.end(),tm.begin(),::tolower);
 
   for(int i=0;i<r.getCount();i++){
-    auto* d=r.getDevice(i);
-    std::string a=d->getAddress().toString(),n=d->haveName()?d->getName():"-";
-    ESP_LOGI(TAG,"  [%d] %s \"%s\" RSSI=%d",i,a.c_str(),n.c_str(),d->getRSSI());
+    auto d=r.getDevice(i);
+    std::string a=d.getAddress().toString(),n=d.haveName()?d.getName():"-";
+    ESP_LOGI(TAG,"  [%d] %s \"%s\" RSSI=%d",i,a.c_str(),n.c_str(),d.getRSSI());
     a.erase(std::remove(a.begin(),a.end(),':'),a.end());
     std::transform(a.begin(),a.end(),a.begin(),::tolower);
-    if(a==tm){ESP_LOGI(TAG,"*** MATCH: %s",n.c_str());target_device_=d;return true;}
+    if(a==tm){ESP_LOGI(TAG,"*** MATCH: %s",n.c_str());target_device_=new NimBLEAdvertisedDevice(d);return true;}
   }
   return false;
 }
@@ -176,7 +176,7 @@ bool OBDComponent::connect_ble(NimBLEAdvertisedDevice* device){
   if(client_){NimBLEDevice::deleteClient(client_);}
   client_=NimBLEDevice::createClient();
   client_->setConnectTimeout(15);
-  if(!client_->connect(*device)){ESP_LOGW(TAG,"connect failed");NimBLEDevice::deleteClient(client_);client_=nullptr;return false;}
+  if(!client_->connect(device)){ESP_LOGW(TAG,"connect failed");NimBLEDevice::deleteClient(client_);client_=nullptr;return false;}
   ESP_LOGI(TAG,"Connected MTU=%d",client_->getMTU());
   return true;
 }
@@ -188,16 +188,13 @@ void OBDComponent::discover_services(){
   auto* svc=client_->getService(SVC_UUID);
   if(svc){char_write_=svc->getCharacteristic(CHAR_WRITE_UUID);
     char_notify_=svc->getCharacteristic(CHAR_NOTIFY_UUID);
-    if(char_notify_)char_notify_->subscribe(true,notify_cb,this);
+    if(char_notify_)char_notify_->subscribe(true,[this](NimBLERemoteCharacteristic*,uint8_t* data,size_t len,bool is_notify){
+      if(is_notify)this->on_notify(data,len);
+    },true);
     ESP_LOGI(TAG,"GATT: write=%p notify=%p",char_write_,char_notify_);}
 }
 
 // ── Notify ────────────────────────────────────────────────────────────
-
-void OBDComponent::notify_cb(NimBLERemoteCharacteristic* chr,uint8_t* data,size_t len,bool is_notify,void* arg){
-  auto* self=static_cast<OBDComponent*>(arg);
-  if(self)self->on_notify(data,len);
-}
 
 void OBDComponent::on_notify(uint8_t* data,size_t len){
   for(size_t i=0;i<len;i++){

@@ -61,8 +61,6 @@ class OBDComponent : public PollingComponent {
   void publish_sensor(size_t idx, float value);
   void on_notify(uint8_t* data, size_t length);
 
-  static void notify_cb(NimBLERemoteCharacteristic* chr, uint8_t* data, size_t len, bool is_notify, void* arg);
-
   std::string mac_address_;
   std::string profile_;
   NimBLEClient* client_{nullptr};
