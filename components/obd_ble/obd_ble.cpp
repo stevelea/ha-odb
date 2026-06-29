@@ -242,7 +242,7 @@ bool OBDComponent::connect_ble() {
   NimBLEScan* scan = NimBLEDevice::getScan();
   NimBLEScanResults results = scan->getResults(10000);  // 10s scan
 
-  NimBLEAdvertisedDevice* device = nullptr;
+  const NimBLEAdvertisedDevice* device = nullptr;
   for (int i = 0; i < results.getCount(); i++) {
     device = results.getDevice(i);
     if (device->getAddress().toString() == mac_address_) {
