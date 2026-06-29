@@ -219,13 +219,14 @@ void startHttpServer() {
         ESP.restart();
     });
 
+    server.init(LittleFS);
     server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET,PUT,POST");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "content-type");
 
-    server.begin();
+    server.begin(LittleFS);
 }
 
 void onOBDConnected() {
@@ -237,6 +238,9 @@ void onOBDConnectError() {
     obdConnected = false;
     ++obdConnectErrors;
 }
+
+// ── forward declarations ────────────────────────────────────────────
+void publishDiscovery(const char *identifier);
 
 // ── MQTT output task ──────────────────────────────────────────────────
 
@@ -256,17 +260,16 @@ void outputTask(void *parameter) {
                     publishDiscovery(identifier);
                 }
 
-                mqtt.publish(HA_T_CPUTEMP, String(temperatureRead(), 1), true);
-                mqtt.publish(HA_T_FREEMEM, String(getESPHeapSize()), true);
-                mqtt.publish(HA_T_UPTIME, String((millis() - startTime.load()) / 1000), true);
-                mqtt.publish(HA_T_RECONNECTS, String(obdConnectErrors.load()), true);
-                mqtt.publish(HA_T_IP_ADDR, WiFi.localIP().toString(), true);
+                mqtt.sendTopicUpdate(HA_T_CPUTEMP, std::string(String(temperatureRead(), 1).c_str()));
+                mqtt.sendTopicUpdate(HA_T_FREEMEM, std::string(String(getESPHeapSize()).c_str()));
+                mqtt.sendTopicUpdate(HA_T_UPTIME, std::string(String((millis() - startTime.load()) / 1000).c_str()));
+                mqtt.sendTopicUpdate(HA_T_RECONNECTS, std::string(String(obdConnectErrors.load()).c_str()));
+                mqtt.sendTopicUpdate(HA_T_IP_ADDR, std::string(WiFi.localIP().toString().c_str()));
             }
 
-            // Publish OBD data
+            // Publish OBD data (auto-published via OBD class internally)
             if (obdConnected && !wifiAPInUse) {
                 OBD.loop();
-                OBD.publish(identifier);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -283,7 +286,7 @@ void startOutputTask(const char *identifier) {
 void stateReadTask(void *parameter) {
     for (;;) {
         if (obdConnected && !wifiAPInUse) {
-            OBD.readStates();
+            OBD.readStates(LittleFS);
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
@@ -298,12 +301,25 @@ void startReadTask() {
 
 void publishDiscovery(const char *identifier) {
     // Diagnostic sensors
-    mqtt.discovery(identifier, HA_T_CPUTEMP, "CPU Temperature", "°C", "temperature", "measurement", "thermometer", true);
-    mqtt.discovery(identifier, HA_T_FREEMEM, "Free Memory", "B", "", "measurement", "memory", true);
-    mqtt.discovery(identifier, HA_T_UPTIME, "Uptime", "s", "duration", "total_increasing", "timer-outline", true);
-    mqtt.discovery(identifier, HA_T_RECONNECTS, "OBD Reconnects", "", "", "total_increasing", "connection", true);
-    mqtt.discovery(identifier, HA_T_IP_ADDR, "IP Address", "", "", "", "ip-network", true);
+    mqtt.sendTopicConfig(HA_T_CPUTEMP, "CPU Temperature", "thermometer", "°C", "temperature", "measurement", "");
+    mqtt.sendTopicConfig(HA_T_FREEMEM, "Free Memory", "memory", "B", "", "measurement", "");
+    mqtt.sendTopicConfig(HA_T_UPTIME, "Uptime", "timer-outline", "s", "duration", "total_increasing", "");
+    mqtt.sendTopicConfig(HA_T_RECONNECTS, "OBD Reconnects", "connection", "", "", "total_increasing", "");
+    mqtt.sendTopicConfig(HA_T_IP_ADDR, "IP Address", "ip-network", "", "", "", "");
     allDiscoverySend = true;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────
+
+String buildIdentifier(const char *devMac) {
+    String mID;
+    if (Settings.MQTT.getIdType() == MQTTSettings::MQTTIdentifierType::CUSTOM &&
+        Settings.MQTT.getIdSuffix().length() > 0) {
+        mID = Settings.MQTT.getIdSuffix().c_str();
+    } else if (devMac != nullptr && strlen(devMac) > 0) {
+        mID = devMac;
+    }
+    return mID;
 }
 
 // ── Setup / Loop ──────────────────────────────────────────────────────

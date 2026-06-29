@@ -85,6 +85,14 @@ public:
     String getAPPassword() const;
 
     void setAPPassword(const char *password);
+
+    String getSSID() const { return String(wifi.ssid); }
+
+    void setSSID(const char *ssid);
+
+    String getPassword() const { return String(wifi.password); }
+
+    void setPassword(const char *password);
 };
 
 class MobileSettings {

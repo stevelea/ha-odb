@@ -143,6 +143,14 @@ String WiFiSettings::getAPPassword() const {
     return wifi.password;
 }
 
+void WiFiSettings::setSSID(const char *ssid) {
+    strncpy(wifi.ssid, ssid, sizeof(wifi.ssid));
+}
+
+void WiFiSettings::setPassword(const char *password) {
+    strncpy(wifi.password, password, sizeof(wifi.password));
+}
+
 void WiFiSettings::setAPPassword(const char *password) {
     strlcpy(wifi.password, password, sizeof(wifi.password));
 }
