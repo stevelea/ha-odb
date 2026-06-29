@@ -255,7 +255,14 @@ bool OBDComponent::connect_ble() {
   // Process already-completed scan results (non-blocking)
   NimBLEScanResults results = NimBLEDevice::getScan()->getResults();
 
-  ESP_LOGI(TAG, "Processing scan: %d device(s) found", results.getCount());
+  ESP_LOGI(TAG, "Scan results: %d device(s) found", results.getCount());
+  for (int i = 0; i < results.getCount(); i++) {
+    auto* d = results.getDevice(i);
+    ESP_LOGI(TAG, "  [%d] %s  \"%s\"  RSSI=%d",
+             i, d->getAddress().toString().c_str(),
+             d->haveName() ? d->getName().c_str() : "-",
+             d->getRSSI());
+  }
 
   // Normalise MAC: strip colons, lowercase for comparison
   std::string target_mac = mac_address_;
