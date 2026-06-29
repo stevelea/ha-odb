@@ -92,6 +92,10 @@ static std::vector<int> hex_to_bytes(const std::string& hex) {
 void OBDComponent::setup() {
   ESP_LOGI(TAG, "OBD BLE component: MAC=%s profile=%s", mac_address_.c_str(), profile_.c_str());
 
+  // Initialize NimBLE (we now own the BLE stack exclusively)
+  NimBLEDevice::init("esp32-obd");
+  ESP_LOGI(TAG, "NimBLE initialized");
+
   // Build PID list in C++
   if (profile_ == "xpeng_g6") {
     for (int i = 0; i < G6_BMS_COUNT; i++) pids_.push_back(G6_BMS[i]);
@@ -133,8 +137,8 @@ void OBDComponent::loop() {
       break;
 
     case PollState::SCANNING:
-      // Check ESPHome's BLE tracker results every 5 seconds
-      if (now - state_start_ms_ > 5000) {
+      // Wait for our 15s scan to complete (non-blocking poll)
+      if (!NimBLEDevice::getScan()->isScanning() || now - state_start_ms_ > 20000) {
         if (connect_ble()) {
           state_ = PollState::DISCOVERING;
         } else {
@@ -241,9 +245,13 @@ void OBDComponent::loop() {
 // ── BLE connection (NimBLE-Arduino 2.2.3 API) ─────────────────────────
 
 void OBDComponent::start_scan() {
-  // Don't fight ESPHome's continuous scan — just let it run.
-  // We'll check results on next SCANNING tick.
-  ESP_LOGD(TAG, "Waiting for BLE tracker results...");
+  // Run a dedicated BLE scan (we own the radio now)
+  NimBLEScan* scan = NimBLEDevice::getScan();
+  scan->setActiveScan(true);
+  scan->setInterval(80);
+  scan->setWindow(80);
+  scan->start(15000, false, true);  // 15s non-continuing
+  ESP_LOGD(TAG, "BLE scan started (15s)...");
 }
 
 bool OBDComponent::connect_ble() {
