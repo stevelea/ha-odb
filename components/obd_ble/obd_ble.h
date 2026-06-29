@@ -1,11 +1,15 @@
-// ESPHome external component: OBD-II BLE client
-// Connects to Veepeak OBDCheck BLE adapter via NimBLE, polls OBD PIDs.
+// ESPHome external component: OBD-II BLE client — C++ header
 #pragma once
 
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/components/sensor/sensor.h"
 #include <NimBLEDevice.h>
+#include <NimBLEClient.h>
+#include <NimBLERemoteService.h>
+#include <NimBLERemoteCharacteristic.h>
+#include <NimBLEScan.h>
+#include <functional>
 #include <vector>
 #include <string>
 
@@ -15,14 +19,10 @@ namespace obd_ble {
 // ── PID definition structure ──────────────────────────────────────────
 struct OBDPidDef {
   const char* name;
-  const char* pid_hex;   // e.g. "221109"
-  const char* formula;    // WiCAN notation: "[B4:B5]/10"
-  const char* unit;
-  const char* device_class;
-  const char* state_class;
-  const char* icon;
+  const char* pid_hex;
+  const char* formula;
   bool high_priority;
-  const char* can_header; // "704" (BMS), "7E0" (VCU), or nullptr
+  const char* can_header;  // "704" (BMS), "7E0" (VCU), or nullptr
 };
 
 // ── Polling state machine ─────────────────────────────────────────────
@@ -44,6 +44,10 @@ class OBDComponent : public PollingComponent {
 
   void set_mac_address(const std::string& mac) { mac_address_ = mac; }
   void set_profile(const std::string& profile) { profile_ = profile; }
+  void set_sensors(std::vector<sensor::Sensor*> sensors, uint32_t count) {
+    sensors_ = std::move(sensors);
+    last_values_.resize(count, NAN);
+  }
 
   void setup() override;
   void update() override;
@@ -58,8 +62,9 @@ class OBDComponent : public PollingComponent {
   bool send_at_command(const std::string& cmd);
   bool send_obd_query(const std::string& pid_hex);
   float parse_response(const std::string& response, const std::string& formula);
-  void switch_ecu_header(const std::string& header);
+  void switch_ecu_header(const std::string& ecu);
   void publish_sensor(size_t idx, float value);
+  void on_notify(uint8_t* data, size_t length);
 
   // BLE objects
   std::string mac_address_;
@@ -72,25 +77,18 @@ class OBDComponent : public PollingComponent {
   // Protocol state
   PollState state_{PollState::IDLE};
   uint32_t state_start_ms_{0};
-  uint32_t last_response_ms_{0};
   std::string rx_buffer_;
   std::string current_command_;
   size_t current_pid_index_{0};
   int init_cmd_index_{0};
   uint32_t poll_cycle_{0};
 
-  // PID data
+  // PID data (sensors created in Python, formulas in C++)
   std::vector<OBDPidDef> pids_;
   std::vector<sensor::Sensor*> sensors_;
   std::vector<float> last_values_;
-  std::string current_ecu_;  // "bms", "vcu", or ""
+  std::string current_ecu_;
   bool bms_done_{false};
-
-  // Callbacks
-  static void notify_callback(NimBLERemoteCharacteristic* pChar,
-                              uint8_t* pData, size_t length,
-                              bool isNotify, void* arg);
-  void on_notify(uint8_t* data, size_t length);
 };
 
 }  // namespace obd_ble
