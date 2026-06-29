@@ -1,121 +1,92 @@
-"""ESPHome external component: OBD-II BLE client for XPENG G6 / SAE vehicles.
+"""ESPHome external component: OBD-II BLE client
 
-Connects to a Veepeak OBDCheck BLE (or compatible ELM327 BLE adapter) via
-ESP32 NimBLE, polls OBD-II PIDs, and exposes them as ESPHome sensors.
-
-REQUIRES Arduino framework (not ESP-IDF). Add this to your config:
-    esp32:
-      board: esp32dev
-      framework:
-        type: arduino
-
-    esp32_ble_tracker:
+Uses ESPHome's built-in ble_client for BLE connection + GATT.
+Our component ONLY handles the ELM327 protocol and sensor publishing.
+No NimBLE-Arduino, no custom BLE scanning.
 
 Example usage:
-    external_components:
-      - source: github://stevelea/ha-odb@main
-        components: [obd_ble]
-        refresh: 0s
+    esp32_ble_tracker:
+
+    ble_client:
+      - mac_address: "8C:DE:52:DE:FA:CF"
+        id: veepeak
 
     obd_ble:
-      mac_address: "8C:DE:52:DE:FA:CF"
+      ble_client_id: veepeak
       profile: xpeng_g6
       update_interval: 30s
 """
 
 import re
-
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import sensor
+from esphome.components import sensor, ble_client
 from esphome.const import CONF_ID
 
-DEPENDENCIES = ["esp32", "esp32_ble_tracker"]
+DEPENDENCIES = ["esp32", "esp32_ble_tracker", "ble_client"]
 AUTO_LOAD = ["sensor"]
 
 obd_ble_ns = cg.esphome_ns.namespace("obd_ble")
-OBDComponent = obd_ble_ns.class_("OBDComponent", cg.PollingComponent)
+OBDComponent = obd_ble_ns.class_("OBDComponent", cg.PollingComponent, cg.Component)
 
-CONF_MAC_ADDRESS = "mac_address"
+CONF_BLE_CLIENT_ID = "ble_client_id"
 CONF_PROFILE = "profile"
 CONF_UPDATE_INTERVAL = "update_interval"
 
-
-def _validate_mac(value):
-    """Validate a BLE MAC address like 8C:DE:52:DE:FA:CF or 8c:de:52:de:fa:cf."""
-    value = cv.string(value)
-    if not re.match(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", value):
-        raise cv.Invalid(f"Invalid MAC address: {value}")
-    return value
-
-
-# PID definitions (name, unit, device_class, state_class, icon)
-# These are passed via config; C++ handles PID hex + formula
 G6_PIDS = [
-    ("SOC", "%", "battery", "measurement", "mdi:battery"),
-    ("SOH", "%", "battery", "measurement", "mdi:battery-heart"),
-    ("HV Voltage", "V", "voltage", "measurement", "mdi:lightning-bolt"),
-    ("HV Current", "A", "current", "measurement", "mdi:current-dc"),
-    ("Max Cell Voltage", "V", "voltage", "measurement", "mdi:battery-plus"),
-    ("Min Cell Voltage", "V", "voltage", "measurement", "mdi:battery-minus"),
-    ("Max Battery Temp", "°C", "temperature", "measurement", "mdi:thermometer-alert"),
-    ("Min Battery Temp", "°C", "temperature", "measurement", "mdi:thermometer"),
-    ("CLTC Range", "km", "distance", "measurement", "mdi:map-marker-distance"),
-    ("Cumulative Charge", "Ah", "energy", "total_increasing", "mdi:battery-charging"),
-    ("Cumulative Dischg", "Ah", "energy", "total_increasing", "mdi:battery-arrow-down"),
-    ("Charge Status", "", "", "", "mdi:ev-station"),
-    ("Charge Limit", "%", "", "measurement", "mdi:battery-lock"),
-    ("Odometer", "km", "distance", "total_increasing", "mdi:counter"),
-    ("12V Battery", "V", "voltage", "measurement", "mdi:car-battery"),
-    ("Vehicle Speed", "km/h", "speed", "measurement", "mdi:speedometer"),
-    ("Accelerator Pedal", "%", "", "measurement", "mdi:gauge"),
-    ("Front Motor RPM", "rpm", "", "measurement", "mdi:engine"),
-    ("Rear Motor RPM", "rpm", "", "measurement", "mdi:engine"),
-    ("Front Motor Torque", "Nm", "", "measurement", "mdi:engine"),
-    ("Rear Motor Torque", "Nm", "", "measurement", "mdi:engine"),
-    ("Charging HVIL", "", "", "", "mdi:ev-station"),
-    ("VCU SoC", "%", "battery", "measurement", "mdi:battery"),
-    ("DC Charge Current", "A", "current", "measurement", "mdi:current-dc"),
-    ("DC Charge Voltage", "V", "voltage", "measurement", "mdi:lightning-bolt"),
-    ("Brake Pressure", "bar", "pressure", "measurement", "mdi:car-brake-alert"),
-    ("Fast Charge Temp 1", "°C", "temperature", "measurement", "mdi:thermometer"),
-    ("Fast Charge Temp 2", "°C", "temperature", "measurement", "mdi:thermometer"),
-    ("Slow Charge Temp 1", "°C", "temperature", "measurement", "mdi:thermometer"),
-    ("Slow Charge Temp 2", "°C", "temperature", "measurement", "mdi:thermometer"),
-    ("Slow Charge Temp 3", "°C", "temperature", "measurement", "mdi:thermometer"),
-    ("Motor Temp", "°C", "temperature", "measurement", "mdi:engine-coolant"),
-    ("Coolant Temp", "°C", "temperature", "measurement", "mdi:coolant-temperature"),
+    ("SOC","%","battery","measurement","mdi:battery"),
+    ("SOH","%","battery","measurement","mdi:battery-heart"),
+    ("HV Voltage","V","voltage","measurement","mdi:lightning-bolt"),
+    ("HV Current","A","current","measurement","mdi:current-dc"),
+    ("Max Cell Voltage","V","voltage","measurement","mdi:battery-plus"),
+    ("Min Cell Voltage","V","voltage","measurement","mdi:battery-minus"),
+    ("Max Battery Temp","°C","temperature","measurement","mdi:thermometer-alert"),
+    ("Min Battery Temp","°C","temperature","measurement","mdi:thermometer"),
+    ("CLTC Range","km","distance","measurement","mdi:map-marker-distance"),
+    ("Cumulative Charge","Ah","energy","total_increasing","mdi:battery-charging"),
+    ("Cumulative Dischg","Ah","energy","total_increasing","mdi:battery-arrow-down"),
+    ("Charge Status","","","","mdi:ev-station"),
+    ("Charge Limit","%","","measurement","mdi:battery-lock"),
+    ("Odometer","km","distance","total_increasing","mdi:counter"),
+    ("12V Battery","V","voltage","measurement","mdi:car-battery"),
+    ("Vehicle Speed","km/h","speed","measurement","mdi:speedometer"),
+    ("Accelerator Pedal","%","","measurement","mdi:gauge"),
+    ("Front Motor RPM","rpm","","measurement","mdi:engine"),
+    ("Rear Motor RPM","rpm","","measurement","mdi:engine"),
+    ("Front Motor Torque","Nm","","measurement","mdi:engine"),
+    ("Rear Motor Torque","Nm","","measurement","mdi:engine"),
+    ("Charging HVIL","","","","mdi:ev-station"),
+    ("VCU SoC","%","battery","measurement","mdi:battery"),
+    ("DC Charge Current","A","current","measurement","mdi:current-dc"),
+    ("DC Charge Voltage","V","voltage","measurement","mdi:lightning-bolt"),
+    ("Brake Pressure","bar","pressure","measurement","mdi:car-brake-alert"),
+    ("Fast Charge Temp 1","°C","temperature","measurement","mdi:thermometer"),
+    ("Fast Charge Temp 2","°C","temperature","measurement","mdi:thermometer"),
+    ("Slow Charge Temp 1","°C","temperature","measurement","mdi:thermometer"),
+    ("Slow Charge Temp 2","°C","temperature","measurement","mdi:thermometer"),
+    ("Slow Charge Temp 3","°C","temperature","measurement","mdi:thermometer"),
+    ("Motor Temp","°C","temperature","measurement","mdi:engine-coolant"),
+    ("Coolant Temp","°C","temperature","measurement","mdi:coolant-temperature"),
 ]
 
-CONFIG_SCHEMA = cv.Schema(
-    {
-        cv.GenerateID(): cv.declare_id(OBDComponent),
-        cv.Required(CONF_MAC_ADDRESS): _validate_mac,
-        cv.Optional(CONF_PROFILE, default="xpeng_g6"): cv.one_of("sae", "xpeng_g6"),
-        cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.positive_time_period_milliseconds,
-    }
-).extend(cv.polling_component_schema("30s"))
+CONFIG_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.declare_id(OBDComponent),
+    cv.Required(CONF_BLE_CLIENT_ID): cv.use_id(ble_client.BLEClient),
+    cv.Optional(CONF_PROFILE, default="xpeng_g6"): cv.one_of("sae","xpeng_g6"),
+    cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.positive_time_period_milliseconds,
+}).extend(cv.polling_component_schema("30s"))
 
 
 async def to_code(config):
-    """Create the C++ component from config and generate sensors."""
-    # Use NimBLE-Arduino 1.4.1 (compatible with ESP-IDF 5.x, no lib conflict)
-    cg.add_library("h2zero/NimBLE-Arduino", "1.4.1")
-    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_ADVERTISEMENT=0")
-    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_GAP=1")
-    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_GATT_CLIENT=1")
-    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_USE_ESP_IDF_NIMBLE=1")
-
-    # Create the main component
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Set MAC address (strip colons)
-    mac_clean = config[CONF_MAC_ADDRESS].replace(":", "").replace("-", "").lower()
-    cg.add(var.set_mac_address(cg.RawExpression(f'"{mac_clean}"')))
+    # Get the ble_client reference
+    parent = await cg.get_variable(config[CONF_BLE_CLIENT_ID])
+    cg.add(var.set_ble_client(parent))
     cg.add(var.set_profile(config[CONF_PROFILE]))
 
-    # Create sensors — minimal codegen, no property setters (not available in C++ API)
+    # Create sensors
     sensor_type = cg.esphome_ns.namespace("sensor").class_("Sensor")
     from esphome.core import ID
 

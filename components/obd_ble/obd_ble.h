@@ -1,12 +1,11 @@
 // ESPHome external component: OBD-II BLE client
-// Discovery via esp32_ble_tracker (ESPBTDeviceListener), GATT via NimBLE-Arduino 1.4.1
+// Uses ESPHome's built-in ble_client for BLE — no NimBLE-Arduino needed
 #pragma once
 
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/components/sensor/sensor.h"
-#include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
-#include <NimBLEDevice.h>
+#include "esphome/components/ble_client/ble_client.h"
 #include <vector>
 #include <string>
 
@@ -19,40 +18,40 @@ struct OBDPidDef {
 };
 
 enum class PollState {
-  IDLE, CONNECTING, DISCOVERING, INIT_ELM, INIT_WAIT,
-  POLL_BMS, POLL_VCU, WAIT_RESPONSE,
+  IDLE, INIT_ELM, INIT_WAIT, POLL_BMS, POLL_VCU, WAIT_RESPONSE,
 };
 
-class OBDComponent : public PollingComponent {
+class OBDComponent : public PollingComponent, public ble_client::BLEClientNode {
  public:
   OBDComponent() : PollingComponent(30000) {}
 
-  void set_mac_address(const std::string& mac) { mac_address_ = mac; }
-  void set_profile(const std::string& profile) { profile_ = profile; }
-  void add_sensor(sensor::Sensor* sens) { sensors_.push_back(sens); last_values_.push_back(NAN); }
+  void set_ble_client(ble_client::BLEClient* client) { ble_client_ = client; }
+  void set_profile(const std::string& p) { profile_ = p; }
+  void add_sensor(sensor::Sensor* s) { sensors_.push_back(s); last_values_.push_back(NAN); }
 
   void setup() override;
   void update() override;
   void loop() override;
   void dump_config() override;
-  float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
+  float get_setup_priority() const override { return setup_priority::AFTER_BLUETOOTH; }
+
+  // BLEClientNode callbacks — called when ble_client connects / receives data
+  void gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t* param) override;
+  void on_connect() override;
+  void on_disconnect() override;
 
  protected:
-  bool check_tracker();
-  void start_connect();
-  bool connect_ble(const NimBLEAddress& addr);
-  void discover_services();
+  void start_init();
   bool send_at_command(const std::string& cmd);
   bool send_obd_query(const std::string& pid_hex);
   float parse_response(const std::string& r, const std::string& f);
   void switch_ecu_header(const std::string& ecu);
   void publish_sensor(size_t idx, float value);
-  void on_notify(uint8_t* data, size_t len);
+  void process_notify(const uint8_t* data, size_t len);
 
-  std::string mac_address_, profile_;
-  NimBLEClient* client_{nullptr};
-  NimBLERemoteCharacteristic* char_write_{nullptr};
-  NimBLERemoteCharacteristic* char_notify_{nullptr};
+  ble_client::BLEClient* ble_client_{nullptr};
+  std::string profile_;
+  int write_handle_{0};
 
   PollState state_{PollState::IDLE};
   uint32_t state_start_ms_{0};
@@ -60,7 +59,7 @@ class OBDComponent : public PollingComponent {
   size_t current_pid_index_{0};
   int init_cmd_index_{0};
   uint32_t poll_cycle_{0};
-  bool bms_done_{false};
+  bool bms_done_{false}, init_done_{false};
 
   std::vector<OBDPidDef> pids_;
   std::vector<sensor::Sensor*> sensors_;

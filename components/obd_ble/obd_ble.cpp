@@ -1,5 +1,4 @@
-// ESPHome external component: OBD-II BLE client
-// Discovery via esp32_ble_tracker, GATT via NimBLE-Arduino 1.4.1
+// ESPHome external component: OBD-II BLE client — uses ble_client only
 #include "obd_ble.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
@@ -11,11 +10,13 @@ namespace esphome {
 namespace obd_ble {
 
 static const char* TAG = "obd_ble";
-static const NimBLEUUID SVC_UUID("0000fff0-0000-1000-8000-00805f9b34fb");
-static const NimBLEUUID CHAR_W_UUID("0000fff1-0000-1000-8000-00805f9b34fb");
-static const NimBLEUUID CHAR_N_UUID("0000fff2-0000-1000-8000-00805f9b34fb");
 static const char ELM_PROMPT='>'; static const uint32_t CMD_TO=5000;
 
+// Veepeak characteristic UUIDs (for handle lookup after ble_client connects)
+static const char* WRITE_CHAR_UUID = "0000fff1-0000-1000-8000-00805f9b34fb";
+static const char* NOTIFY_CHAR_UUID = "0000fff2-0000-1000-8000-00805f9b34fb";
+
+// G6 PIDs (same as before)
 static const OBDPidDef G6_BMS[]={
   {"SOC","221109","[B4:B5]/10",true,"704"},{"SOH","22110A","[B4:B5]/10",false,"704"},
   {"HV Voltage","221101","[B4:B5]/10",true,"704"},{"HV Current","221103","[B4:B5]/2-1600",true,"704"},
@@ -56,91 +57,62 @@ static std::vector<int> h2b(const std::string& h){std::vector<int> b;
 // ════════════════════════════════════════════════════
 
 void OBDComponent::setup(){
-  ESP_LOGI(TAG,"OBD: MAC=%s profile=%s",mac_address_.c_str(),profile_.c_str());
-  NimBLEDevice::init("esp32-obd");
+  ESP_LOGI(TAG,"OBD: profile=%s",profile_.c_str());
   if(profile_=="xpeng_g6"){for(int i=0;i<G6_BC;i++)pids_.push_back(G6_BMS[i]);for(int i=0;i<G6_VC;i++)pids_.push_back(G6_VCU[i]);}
-  ESP_LOGI(TAG,"%d PIDs loaded, waiting for device via BLE tracker...",pids_.size());
+  ESP_LOGI(TAG,"%d PIDs, %d sensors",pids_.size(),sensors_.size());
 }
 void OBDComponent::dump_config(){
-  ESP_LOGCONFIG(TAG,"OBD-II BLE MAC=%s profile=%s PIDs=%d",mac_address_.c_str(),profile_.c_str(),pids_.size());
+  ESP_LOGCONFIG(TAG,"OBD-II BLE profile=%s PIDs=%d",profile_.c_str(),pids_.size());
 }
 
-// ── Check BLE tracker for target device ──────────────────────────────────
+// ── BLEClientNode callbacks ───────────────────────────────────────────
 
-bool OBDComponent::check_tracker(){
-  if(client_&&client_->isConnected())return false;
-  // Parse target MAC
-  uint8_t t[6];int j=0;
-  std::string m=mac_address_;m.erase(std::remove(m.begin(),m.end(),':'),m.end());
-  m.erase(std::remove(m.begin(),m.end(),'-'),m.end());
-  for(size_t i=0;i<m.length()&&j<6;i+=2){int hi=(m[i]>='a'?m[i]-'a'+10:m[i]>='A'?m[i]-'A'+10:m[i]-'0');
-    int lo=(m[i+1]>='a'?m[i+1]-'a'+10:m[i+1]>='A'?m[i+1]-'A'+10:m[i+1]-'0');t[j++]=(hi<<4)|lo;}
+void OBDComponent::on_connect(){
+  ESP_LOGI(TAG,"BLE connected! Looking up characteristics...");
+  // Find the write characteristic handle via ble_client
+  auto* chr=ble_client_->get_characteristic(ble_client::BLEUUID(WRITE_CHAR_UUID),
+                                             ble_client::BLEUUID("0000fff0-0000-1000-8000-00805f9b34fb"));
+  if(chr){write_handle_=chr->handle;ESP_LOGI(TAG,"Write char handle: %d",write_handle_);}
+  else{ESP_LOGW(TAG,"Write characteristic not found");return;}
 
-  // Stop tracker scan, run our own 5s scan, then resume tracker
-  NimBLEScan* scan=NimBLEDevice::getScan();
-  scan->stop();delay(50);
-  scan->setActiveScan(true);scan->setInterval(80);scan->setWindow(80);
-  NimBLEScanResults r=scan->start(5,false);  // 5s blocking scan, returns results
-  scan->start(0,true);                       // resume continuous scan
-  ESP_LOGI(TAG,"Scan: %d device(s)",r.getCount());
+  // Subscribe to notify characteristic
+  auto* notify=ble_client_->get_characteristic(ble_client::BLEUUID(NOTIFY_CHAR_UUID),
+                                                ble_client::BLEUUID("0000fff0-0000-1000-8000-00805f9b34fb"));
+  if(notify){ble_client_->subscribe_characteristic(notify);ESP_LOGI(TAG,"Subscribed to notify char");}
+  start_init();
+}
 
-  for(int i=0;i<r.getCount();i++){
-    auto d=r.getDevice(i);
-    auto addr=d.getAddress().getNative();
-    if(memcmp(addr,t,6)==0){
-      ESP_LOGI(TAG,"*** VEEPEAK found! RSSI=%d, connecting...",d.getRSSI());
-      start_connect();
-      return true;
-    }
+void OBDComponent::on_disconnect(){
+  ESP_LOGI(TAG,"BLE disconnected");
+  write_handle_=0; init_done_=false; state_=PollState::IDLE;
+}
+
+void OBDComponent::gattc_event_handler(esp_gattc_cb_event_t event,esp_gatt_if_t gattc_if,esp_ble_gattc_cb_param_t* param){
+  if(event==ESP_GATTC_NOTIFY_EVT){
+    process_notify(param->notify.value,param->notify.value_len);
   }
-  return false;
 }
 
-// ── Connection ──────────────────────────────────────────────────────────
+// ── ELM327 init ───────────────────────────────────────────────────────
 
-void OBDComponent::start_connect(){
-  if(state_!=PollState::IDLE)return;
-  auto* scan=NimBLEDevice::getScan();if(scan->isScanning())scan->stop();
-  NimBLEAddress addr(mac_address_,BLE_ADDR_PUBLIC);
-  if(connect_ble(addr)){state_=PollState::DISCOVERING;state_start_ms_=millis();}
-  else{ESP_LOGW(TAG,"Connect failed");}
+void OBDComponent::start_init(){
+  init_cmd_index_=0; init_done_=false; state_=PollState::INIT_ELM;
+  state_start_ms_=millis();
 }
 
-bool OBDComponent::connect_ble(const NimBLEAddress& addr){
-  if(client_)NimBLEDevice::deleteClient(client_);
-  client_=NimBLEDevice::createClient();client_->setConnectTimeout(15);
-  if(!client_->connect(addr)){ESP_LOGW(TAG,"BLE connect failed");NimBLEDevice::deleteClient(client_);client_=nullptr;return false;}
-  ESP_LOGI(TAG,"Connected MTU=%d",client_->getMTU());return true;
-}
-
-void OBDComponent::discover_services(){
-  if(!client_)return;
-  auto* svc=client_->getService(SVC_UUID);
-  if(svc){char_write_=svc->getCharacteristic(CHAR_W_UUID);char_notify_=svc->getCharacteristic(CHAR_N_UUID);
-    if(char_notify_)char_notify_->subscribe(true,[this](NimBLERemoteCharacteristic*,uint8_t* d,size_t l,bool n){if(n)on_notify(d,l);},true);
-    ESP_LOGI(TAG,"GATT ready: write=%p notify=%p",char_write_,char_notify_);}
-}
-
-// ── update / loop ──────────────────────────────────────────────────────
+// ── update / loop ─────────────────────────────────────────────────────
 
 void OBDComponent::update(){
-  if(state_==PollState::IDLE&&client_&&client_->isConnected()&&char_notify_){
+  if(state_==PollState::IDLE&&init_done_&&ble_client_&&ble_client_->is_connected()){
     poll_cycle_++;current_pid_index_=0;bms_done_=false;state_=PollState::POLL_BMS;state_start_ms_=millis();}
 }
 
 void OBDComponent::loop(){
   uint32_t now=millis();
   switch(state_){
-    case PollState::IDLE:
-      if(now-state_start_ms_>5000){check_tracker();state_start_ms_=now;}break;
-    case PollState::CONNECTING:if(now-state_start_ms_>15000){state_=PollState::IDLE;}break;
-    case PollState::DISCOVERING:
-      discover_services();
-      if(char_write_&&char_notify_){init_cmd_index_=0;state_=PollState::INIT_ELM;ESP_LOGI(TAG,"Starting ELM327 init");}
-      else if(now-state_start_ms_>10000){ESP_LOGW(TAG,"GATT discovery timeout");state_=PollState::IDLE;}
-      break;
+    case PollState::IDLE:break;
     case PollState::INIT_ELM:
-      if(init_cmd_index_>=I_CNT){ESP_LOGI(TAG,"ELM327 ready");current_ecu_="bms";state_=PollState::IDLE;break;}
+      if(init_cmd_index_>=I_CNT){ESP_LOGI(TAG,"ELM327 ready");init_done_=true;current_ecu_="bms";state_=PollState::IDLE;break;}
       send_at_command(I_CMD[init_cmd_index_]);current_command_=I_CMD[init_cmd_index_];
       state_=PollState::INIT_WAIT;state_start_ms_=now;break;
     case PollState::INIT_WAIT:if(now-state_start_ms_>CMD_TO){init_cmd_index_++;state_=PollState::INIT_ELM;}break;
@@ -161,18 +133,28 @@ void OBDComponent::loop(){
   }
 }
 
-// ── ELM327 ──────────────────────────────────────────────────────────────
+// ── Send commands ─────────────────────────────────────────────────────
 
-bool OBDComponent::send_at_command(const std::string& cmd){if(!char_write_)return false;std::string p=cmd+"\r";return char_write_->writeValue((uint8_t*)p.c_str(),p.length(),false);}
-bool OBDComponent::send_obd_query(const std::string& pid){if(!char_write_)return false;std::string p="22 "+pid+"\r";return char_write_->writeValue((uint8_t*)p.c_str(),p.length(),false);}
+bool OBDComponent::send_at_command(const std::string& cmd){
+  if(!ble_client_||write_handle_==0)return false;
+  std::string p=cmd+"\r";
+  ble_client_->write_characteristic(write_handle_,(uint8_t*)p.c_str(),p.length());
+  return true;
+}
+bool OBDComponent::send_obd_query(const std::string& pid){
+  if(!ble_client_||write_handle_==0)return false;
+  std::string p="22 "+pid+"\r";
+  ble_client_->write_characteristic(write_handle_,(uint8_t*)p.c_str(),p.length());
+  return true;
+}
 void OBDComponent::switch_ecu_header(const std::string& ecu){
   if(ecu=="bms"){send_at_command("AT SH 704");delay(60);send_at_command("AT CRA 784");delay(60);send_at_command("AT FCSH 704");delay(60);}
   else{send_at_command("AT SH 7E0");delay(60);send_at_command("AT CRA 7E8");delay(60);send_at_command("AT FCSH 7E0");delay(60);}
 }
 
-// ── Notify ──────────────────────────────────────────────────────────────
+// ── Notifications ─────────────────────────────────────────────────────
 
-void OBDComponent::on_notify(uint8_t* data,size_t len){
+void OBDComponent::process_notify(const uint8_t* data,size_t len){
   for(size_t i=0;i<len;i++){
     if(data[i]==ELM_PROMPT){std::string c;for(char ch:rx_buffer_)if(ch!=' '&&ch!='\r'&&ch!='\n'&&ch!='\t'&&ch!='>')c+=ch;rx_buffer_.clear();if(c.empty())return;
       if(state_==PollState::INIT_WAIT){init_cmd_index_++;state_=PollState::INIT_ELM;}
@@ -184,7 +166,7 @@ void OBDComponent::on_notify(uint8_t* data,size_t len){
   }
 }
 
-// ── Parser ──────────────────────────────────────────────────────────────
+// ── Formula parser ────────────────────────────────────────────────────
 
 float OBDComponent::parse_response(const std::string& r,const std::string& f){
   if(r.find("ERROR")!=std::string::npos||r.find("NO DATA")!=std::string::npos||r.find("SEARCHING")!=std::string::npos||r.find("UNABLE")!=std::string::npos||r.find("STOPPED")!=std::string::npos)return NAN;
