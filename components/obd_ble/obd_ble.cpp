@@ -1,23 +1,23 @@
-// ESPHome external component: OBD-II BLE client — uses ble_client only
+// ESPHome external component: OBD-II BLE client via ble_client/BLEClientNode
 #include "obd_ble.h"
 #include "esphome/core/log.h"
-#include "esphome/core/application.h"
+#include "esphome/components/esp32_ble/ble_uuid.h"
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
-#include <esp_gattc_api.h>
 
 namespace esphome {
 namespace obd_ble {
 
 static const char* TAG = "obd_ble";
+
+// Veepeak UUIDs as raw bytes (128-bit, reversed per BLE byte order)
+static const uint8_t SVC_UUID_RAW[]  = {0xFB,0x34,0x9B,0x5F,0x80,0x00,0x00,0x80,0x00,0x10,0x00,0x00,0xF0,0xFF,0x00,0x00};
+static const uint8_t WRITE_UUID_RAW[]= {0xFB,0x34,0x9B,0x5F,0x80,0x00,0x00,0x80,0x00,0x10,0x00,0x00,0xF1,0xFF,0x00,0x00};
+static const uint8_t NOTIFY_UUID_RAW[]={0xFB,0x34,0x9B,0x5F,0x80,0x00,0x00,0x80,0x00,0x10,0x00,0x00,0xF2,0xFF,0x00,0x00};
+
 static const char ELM_PROMPT='>'; static const uint32_t CMD_TO=5000;
 
-// Veepeak characteristic UUIDs (for handle lookup after ble_client connects)
-static const char* WRITE_CHAR_UUID = "0000fff1-0000-1000-8000-00805f9b34fb";
-static const char* NOTIFY_CHAR_UUID = "0000fff2-0000-1000-8000-00805f9b34fb";
-
-// G6 PIDs (same as before)
 static const OBDPidDef G6_BMS[]={
   {"SOC","221109","[B4:B5]/10",true,"704"},{"SOH","22110A","[B4:B5]/10",false,"704"},
   {"HV Voltage","221101","[B4:B5]/10",true,"704"},{"HV Current","221103","[B4:B5]/2-1600",true,"704"},
@@ -55,55 +55,13 @@ static std::vector<int> h2b(const std::string& h){std::vector<int> b;
     lo=(lo>='0'&&lo<='9')?lo-'0':(lo>='A'&&lo<='F')?lo-'A'+10:(lo>='a'&&lo<='f')?lo-'a'+10:0;
     b.push_back((hi<<4)|lo);}return b;}
 
-// ════════════════════════════════════════════════════
-
 void OBDComponent::setup(){
-  ESP_LOGI(TAG,"OBD: profile=%s",profile_.c_str());
+  ESP_LOGI(TAG,"OBD: profile=%s PIDs=%d",profile_.c_str(),pids_.size());
   if(profile_=="xpeng_g6"){for(int i=0;i<G6_BC;i++)pids_.push_back(G6_BMS[i]);for(int i=0;i<G6_VC;i++)pids_.push_back(G6_VCU[i]);}
-  ESP_LOGI(TAG,"%d PIDs, %d sensors",pids_.size(),sensors_.size());
 }
 void OBDComponent::dump_config(){
   ESP_LOGCONFIG(TAG,"OBD-II BLE profile=%s PIDs=%d",profile_.c_str(),pids_.size());
 }
-
-// ── BLEClientNode callbacks ───────────────────────────────────────────
-
-void OBDComponent::gattc_event_handler(esp_gattc_cb_event_t event,esp_gatt_if_t gattc_if,esp_ble_gattc_cb_param_t* param){
-  switch(event){
-    case ESP_GATTC_CONNECT_EVT:
-      ESP_LOGI(TAG,"BLE connected! Looking up characteristics...");
-      {
-        // Find write characteristic handle
-        auto* chr=ble_client_->get_characteristic(
-          esphome::esp32_ble::ESPBTUUID::from_uint16(0xFFF1),
-          esphome::esp32_ble::ESPBTUUID::from_uint16(0xFFF0));
-        if(chr){write_handle_=chr->handle;ESP_LOGI(TAG,"Write handle: %d",write_handle_);}
-        else{ESP_LOGW(TAG,"Write char not found");}
-      }
-      break;
-    case ESP_GATTC_DISCONNECT_EVT:
-      ESP_LOGI(TAG,"BLE disconnected");
-      write_handle_=0; init_done_=false; state_=PollState::IDLE;
-      break;
-    case ESP_GATTC_REG_FOR_NOTIFY_EVT:
-      ESP_LOGI(TAG,"Notify subscribed");
-      start_init();
-      break;
-    case ESP_GATTC_NOTIFY_EVT:
-      process_notify(param->notify.value,param->notify.value_len);
-      break;
-    default:break;
-  }
-}
-
-// ── ELM327 init ───────────────────────────────────────────────────────
-
-void OBDComponent::start_init(){
-  init_cmd_index_=0; init_done_=false; state_=PollState::INIT_ELM;
-  state_start_ms_=millis();
-}
-
-// ── update / loop ─────────────────────────────────────────────────────
 
 void OBDComponent::update(){
   if(state_==PollState::IDLE&&init_done_&&ble_client_&&ble_client_->connected()){
@@ -115,7 +73,7 @@ void OBDComponent::loop(){
   switch(state_){
     case PollState::IDLE:break;
     case PollState::INIT_ELM:
-      if(init_cmd_index_>=I_CNT){ESP_LOGI(TAG,"ELM327 ready");init_done_=true;current_ecu_="bms";state_=PollState::IDLE;break;}
+      if(init_cmd_index_>=I_CNT){ESP_LOGI(TAG,"ELM327 ready");current_ecu_="bms";state_=PollState::IDLE;break;}
       send_at_command(I_CMD[init_cmd_index_]);current_command_=I_CMD[init_cmd_index_];
       state_=PollState::INIT_WAIT;state_start_ms_=now;break;
     case PollState::INIT_WAIT:if(now-state_start_ms_>CMD_TO){init_cmd_index_++;state_=PollState::INIT_ELM;}break;
@@ -136,38 +94,87 @@ void OBDComponent::loop(){
   }
 }
 
-// ── Send commands ─────────────────────────────────────────────────────
+// ── BLEClientNode: called when ble_client discovers services ──────────
 
-bool OBDComponent::send_at_command(const std::string& cmd){
-  if(!ble_client_||write_handle_==0)return false;
-  std::string p=cmd+"\r";
-  esp_ble_gattc_write_char(ble_client_->get_gattc_if(),ble_client_->get_conn_id(),
-    write_handle_,p.length(),(uint8_t*)p.c_str(),ESP_GATT_WRITE_TYPE_NO_RSP,ESP_GATT_AUTH_REQ_NONE);
-  return true;
+void OBDComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
+                                        esp_ble_gattc_cb_param_t* param){
+  switch(event){
+    case ESP_GATTC_SEARCH_CMPL_EVT:
+      ESP_LOGI(TAG,"Service discovery complete");
+      on_services_discovered();
+      break;
+    case ESP_GATTC_WRITE_CHAR_EVT:
+      if(param->write.status==ESP_GATT_OK)on_write_complete();
+      break;
+    case ESP_GATTC_NOTIFY_EVT:
+      process_response(std::string((char*)param->notify.value,param->notify.value_len));
+      break;
+    default:break;
+  }
 }
-bool OBDComponent::send_obd_query(const std::string& pid){
-  if(!ble_client_||write_handle_==0)return false;
+
+void OBDComponent::on_services_discovered(){
+  auto svc_uuid=esp32_ble::ESPBTUUID(SVC_UUID_RAW,16);
+  auto w_uuid=esp32_ble::ESPBTUUID(WRITE_UUID_RAW,16);
+  auto n_uuid=esp32_ble::ESPBTUUID(NOTIFY_UUID_RAW,16);
+
+  auto* wc=ble_client_->get_characteristic(svc_uuid,w_uuid);
+  auto* nc=ble_client_->get_characteristic(svc_uuid,n_uuid);
+  if(wc&&nc){
+    chr_write_handle_=wc->handle;chr_notify_handle_=nc->handle;
+    ESP_LOGI(TAG,"GATT: write=%d notify=%d",chr_write_handle_,chr_notify_handle_);
+    // Fetch CCCD handle by descriptor discovery
+    auto* cccd_desc=nc->get_descriptor(esp32_ble::ESPBTUUID::from_uint16(0x2902));
+    cccd_handle_=cccd_desc?cccd_desc->handle:(nc->handle+1);
+    // Enable notifications: write 0x0100 to CCCD
+    uint8_t val[]={0x01,0x00};
+    nc->write_descriptor(cccd_handle_>=nc->handle?cccd_handle_:nc->handle+1,val,2);
+    init_cmd_index_=0;state_=PollState::INIT_ELM;state_start_ms_=millis();
+    ESP_LOGI(TAG,"Starting ELM327 init...");
+  }
+}
+
+void OBDComponent::on_write_complete(){
+  if(!init_done_&&chr_notify_handle_!=0){
+    init_done_=true;
+    ESP_LOGI(TAG,"CCCD written, notifications enabled");
+  }
+}
+
+// ── ELM327 commands ───────────────────────────────────────────────────
+
+void OBDComponent::send_at_command(const std::string& cmd){
+  if(!ble_client_||!ble_client_->connected())return;
+  std::string p=cmd+"\r";
+  ble_client_->get_characteristic(esp32_ble::ESPBTUUID(SVC_UUID_RAW,16),
+                                   esp32_ble::ESPBTUUID(WRITE_UUID_RAW,16))
+      ->write_value((uint8_t*)p.c_str(),p.length(),false);
+}
+void OBDComponent::send_obd_query(const std::string& pid){
+  if(!ble_client_||!ble_client_->connected())return;
   std::string p="22 "+pid+"\r";
-  esp_ble_gattc_write_char(ble_client_->get_gattc_if(),ble_client_->get_conn_id(),
-    write_handle_,p.length(),(uint8_t*)p.c_str(),ESP_GATT_WRITE_TYPE_NO_RSP,ESP_GATT_AUTH_REQ_NONE);
-  return true;
+  ble_client_->get_characteristic(esp32_ble::ESPBTUUID(SVC_UUID_RAW,16),
+                                   esp32_ble::ESPBTUUID(WRITE_UUID_RAW,16))
+      ->write_value((uint8_t*)p.c_str(),p.length(),false);
 }
 void OBDComponent::switch_ecu_header(const std::string& ecu){
   if(ecu=="bms"){send_at_command("AT SH 704");delay(60);send_at_command("AT CRA 784");delay(60);send_at_command("AT FCSH 704");delay(60);}
   else{send_at_command("AT SH 7E0");delay(60);send_at_command("AT CRA 7E8");delay(60);send_at_command("AT FCSH 7E0");delay(60);}
 }
 
-// ── Notifications ─────────────────────────────────────────────────────
+// ── Notification processing ───────────────────────────────────────────
 
-void OBDComponent::process_notify(const uint8_t* data,size_t len){
-  for(size_t i=0;i<len;i++){
-    if(data[i]==ELM_PROMPT){std::string c;for(char ch:rx_buffer_)if(ch!=' '&&ch!='\r'&&ch!='\n'&&ch!='\t'&&ch!='>')c+=ch;rx_buffer_.clear();if(c.empty())return;
+void OBDComponent::process_response(const std::string& data){
+  for(char c:data){
+    if(c==ELM_PROMPT){
+      std::string clean;for(char ch:rx_buffer_)if(ch!=' '&&ch!='\r'&&ch!='\n'&&ch!='\t'&&ch!='>')clean+=ch;rx_buffer_.clear();
+      if(clean.empty())return;
       if(state_==PollState::INIT_WAIT){init_cmd_index_++;state_=PollState::INIT_ELM;}
       else if(state_==PollState::WAIT_RESPONSE&&current_pid_index_<pids_.size()){
-        auto&p=pids_[current_pid_index_];float v=parse_response(c,p.formula);
+        auto&p=pids_[current_pid_index_];float v=parse_response(clean,p.formula);
         if(!std::isnan(v)&&current_pid_index_<sensors_.size()){publish_sensor(current_pid_index_,v);ESP_LOGD(TAG,"%s=%.2f",p.name,v);}
-        current_pid_index_++;state_=(bms_done_&&current_pid_index_>=pids_.size())?PollState::IDLE:(bms_done_?PollState::POLL_VCU:PollState::POLL_BMS);}}
-    else rx_buffer_+=(char)data[i];
+        current_pid_index_++;state_=(bms_done_&&current_pid_index_>=pids_.size())?PollState::IDLE:(bms_done_?PollState::POLL_VCU:PollState::POLL_BMS);}
+    }else rx_buffer_+=c;
   }
 }
 
@@ -192,7 +199,6 @@ float OBDComponent::parse_response(const std::string& r,const std::string& f){
     else if(op=='<'&&pp<e.length()&&e[pp]=='<'){pp++;rv=(int)rv<<(int)rh;}else if(op=='>'&&pp<e.length()&&e[pp]=='>'){pp++;rv=(int)rv>>(int)rh;}}
   return rv;
 }
-
 void OBDComponent::publish_sensor(size_t idx,float v){if(idx<sensors_.size()){last_values_[idx]=v;sensors_[idx]->publish_state(v);}}
 
 }  // namespace obd_ble
