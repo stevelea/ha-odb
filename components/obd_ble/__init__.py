@@ -3,6 +3,12 @@
 Connects to a Veepeak OBDCheck BLE (or compatible ELM327 BLE adapter) via
 ESP32 NimBLE, polls OBD-II PIDs, and exposes them as ESPHome sensors.
 
+REQUIRES Arduino framework (not ESP-IDF). Add this to your config:
+    esp32:
+      board: esp32dev
+      framework:
+        type: arduino
+
 Example usage:
     external_components:
       - source: github://stevelea/ha-odb@main
@@ -48,6 +54,14 @@ CONFIG_SCHEMA = cv.Schema(
 
 async def to_code(config):
     """Create the C++ component from config."""
+    # Add NimBLE-Arduino library dependency
+    cg.add_library("h2zero/NimBLE-Arduino", "2.2.3")
+
+    # NimBLE configuration — minimise RAM, only GATT client needed
+    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_ADVERTISEMENT=0")
+    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_GAP=1")
+    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_GATT_CLIENT=1")
+
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
