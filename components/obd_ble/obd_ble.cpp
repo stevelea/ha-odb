@@ -242,10 +242,20 @@ bool OBDComponent::connect_ble() {
   NimBLEScan* scan = NimBLEDevice::getScan();
   NimBLEScanResults results = scan->getResults(10000);  // 10s scan
 
+  // Normalise MAC: strip colons, lowercase for comparison
+  std::string target_mac = mac_address_;
+  target_mac.erase(std::remove(target_mac.begin(), target_mac.end(), ':'), target_mac.end());
+  target_mac.erase(std::remove(target_mac.begin(), target_mac.end(), '-'), target_mac.end());
+  std::transform(target_mac.begin(), target_mac.end(), target_mac.begin(), ::tolower);
+
   const NimBLEAdvertisedDevice* device = nullptr;
   for (int i = 0; i < results.getCount(); i++) {
     device = results.getDevice(i);
-    if (device->getAddress().toString() == mac_address_) {
+    std::string addr = device->getAddress().toString();
+    addr.erase(std::remove(addr.begin(), addr.end(), ':'), addr.end());
+    std::transform(addr.begin(), addr.end(), addr.begin(), ::tolower);
+    if (addr == target_mac) {
+      ESP_LOGI(TAG, "Match found: %s (index %d)", device->getName().c_str(), i);
       break;
     }
     device = nullptr;
