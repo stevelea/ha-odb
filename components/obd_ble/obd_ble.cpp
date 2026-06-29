@@ -76,14 +76,13 @@ bool OBDComponent::check_tracker(){
   for(size_t i=0;i<m.length()&&j<6;i+=2){int hi=(m[i]>='a'?m[i]-'a'+10:m[i]>='A'?m[i]-'A'+10:m[i]-'0');
     int lo=(m[i+1]>='a'?m[i+1]-'a'+10:m[i+1]>='A'?m[i+1]-'A'+10:m[i+1]-'0');t[j++]=(hi<<4)|lo;}
 
-  // Check tracker's discovered devices
-  auto* tracker=esp32_ble_tracker::global_esp32_ble_tracker;
-  if(!tracker)return false;
-  auto devices=tracker->get_discovered();
-  for(auto& d:devices){
-    auto a=d.address_64();
-    if(memcmp(a,t,6)==0){
-      ESP_LOGI(TAG,"*** VEEPEAK found! RSSI=%d, connecting...",d.get_rssi());
+  // Use NimBLE directly — tracker's scan results are in the same buffer
+  NimBLEScanResults r=NimBLEDevice::getScan()->getResults();
+  for(int i=0;i<r.getCount();i++){
+    auto d=r.getDevice(i);
+    auto addr=d.getAddress().getNative();
+    if(memcmp(addr,t,6)==0){
+      ESP_LOGI(TAG,"*** VEEPEAK found! RSSI=%d, connecting...",d.getRSSI());
       start_connect();
       return true;
     }
