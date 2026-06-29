@@ -59,37 +59,44 @@ void OBDComponent::setup(){
   ESP_LOGI(TAG,"OBD: MAC=%s profile=%s",mac_address_.c_str(),profile_.c_str());
   NimBLEDevice::init("esp32-obd");
   if(profile_=="xpeng_g6"){for(int i=0;i<G6_BC;i++)pids_.push_back(G6_BMS[i]);for(int i=0;i<G6_VC;i++)pids_.push_back(G6_VCU[i]);}
-  esp32_ble_tracker::global_esp32_ble_tracker->register_listener(this);
-  ESP_LOGI(TAG,"Registered BLE listener, %d PIDs",pids_.size());
+  ESP_LOGI(TAG,"%d PIDs loaded, waiting for device via BLE tracker...",pids_.size());
 }
 void OBDComponent::dump_config(){
   ESP_LOGCONFIG(TAG,"OBD-II BLE MAC=%s profile=%s PIDs=%d",mac_address_.c_str(),profile_.c_str(),pids_.size());
 }
 
-// ── ESPBTDeviceListener: tracker calls this for every discovered device ──
+// ── Check BLE tracker for target device ──────────────────────────────────
 
-bool OBDComponent::parse_device(const esp32_ble_tracker::ESPBTDevice& device){
+bool OBDComponent::check_tracker(){
   if(client_&&client_->isConnected())return false;
-  // Compare MAC
-  auto a=device.address_64();
+  // Parse target MAC
   uint8_t t[6];int j=0;
   std::string m=mac_address_;m.erase(std::remove(m.begin(),m.end(),':'),m.end());
   m.erase(std::remove(m.begin(),m.end(),'-'),m.end());
   for(size_t i=0;i<m.length()&&j<6;i+=2){int hi=(m[i]>='a'?m[i]-'a'+10:m[i]>='A'?m[i]-'A'+10:m[i]-'0');
     int lo=(m[i+1]>='a'?m[i+1]-'a'+10:m[i+1]>='A'?m[i+1]-'A'+10:m[i+1]-'0');t[j++]=(hi<<4)|lo;}
-  if(memcmp(a,t,6)!=0)return false;
 
-  ESP_LOGI(TAG,"*** VEEPEAK found! RSSI=%d, connecting...",device.get_rssi());
-  start_connect(device);
-  return true;
+  // Check tracker's discovered devices
+  auto* tracker=esp32_ble_tracker::global_esp32_ble_tracker;
+  if(!tracker)return false;
+  auto devices=tracker->get_discovered();
+  for(auto& d:devices){
+    auto a=d.address_64();
+    if(memcmp(a,t,6)==0){
+      ESP_LOGI(TAG,"*** VEEPEAK found! RSSI=%d, connecting...",d.get_rssi());
+      start_connect();
+      return true;
+    }
+  }
+  return false;
 }
 
 // ── Connection ──────────────────────────────────────────────────────────
 
-void OBDComponent::start_connect(const esp32_ble_tracker::ESPBTDevice& device){
+void OBDComponent::start_connect(){
   if(state_!=PollState::IDLE)return;
   auto* scan=NimBLEDevice::getScan();if(scan->isScanning())scan->stop();
-  NimBLEAddress addr(device.address_64(),BLE_ADDR_PUBLIC);
+  NimBLEAddress addr(mac_address_,BLE_ADDR_PUBLIC);
   if(connect_ble(addr)){state_=PollState::DISCOVERING;state_start_ms_=millis();}
   else{ESP_LOGW(TAG,"Connect failed");}
 }
@@ -119,7 +126,8 @@ void OBDComponent::update(){
 void OBDComponent::loop(){
   uint32_t now=millis();
   switch(state_){
-    case PollState::IDLE:break;
+    case PollState::IDLE:
+      if(now-state_start_ms_>5000){check_tracker();state_start_ms_=now;}break;
     case PollState::CONNECTING:if(now-state_start_ms_>15000){state_=PollState::IDLE;}break;
     case PollState::DISCOVERING:
       discover_services();

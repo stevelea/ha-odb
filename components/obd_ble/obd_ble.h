@@ -23,8 +23,7 @@ enum class PollState {
   POLL_BMS, POLL_VCU, WAIT_RESPONSE,
 };
 
-class OBDComponent : public PollingComponent,
-                     public esp32_ble_tracker::ESPBTDeviceListener {
+class OBDComponent : public PollingComponent {
  public:
   OBDComponent() : PollingComponent(30000) {}
 
@@ -38,10 +37,9 @@ class OBDComponent : public PollingComponent,
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
-  bool parse_device(const esp32_ble_tracker::ESPBTDevice& device) override;
-
  protected:
-  void start_connect(const esp32_ble_tracker::ESPBTDevice& device);
+  bool check_tracker();
+  void start_connect();
   bool connect_ble(const NimBLEAddress& addr);
   void discover_services();
   bool send_at_command(const std::string& cmd);
