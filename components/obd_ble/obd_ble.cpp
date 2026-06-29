@@ -92,9 +92,8 @@ static std::vector<int> hex_to_bytes(const std::string& hex) {
 void OBDComponent::setup() {
   ESP_LOGI(TAG, "OBD BLE component: MAC=%s profile=%s", mac_address_.c_str(), profile_.c_str());
 
-  // Initialize NimBLE (we now own the BLE stack exclusively)
-  NimBLEDevice::init("esp32-obd");
-  ESP_LOGI(TAG, "NimBLE initialized");
+  // Do NOT call NimBLEDevice::init() — esp32_ble_tracker already initializes NimBLE.
+  // Calling init() a second time breaks the tracker's scan.
 
   // Build PID list in C++
   if (profile_ == "xpeng_g6") {
@@ -246,13 +245,9 @@ void OBDComponent::loop() {
 // ── BLE connection (NimBLE-Arduino 2.2.3 API) ─────────────────────────
 
 void OBDComponent::start_scan() {
-  // Run a dedicated BLE scan (we own the radio now)
-  NimBLEScan* scan = NimBLEDevice::getScan();
-  scan->setActiveScan(true);
-  scan->setInterval(80);
-  scan->setWindow(80);
-  scan->start(15, false, true);  // 15 seconds (NimBLE duration is in seconds)
-  ESP_LOGD(TAG, "BLE scan started (15s)...");
+  // esp32_ble_tracker is already scanning continuously.
+  // Just record the time — connect_ble() will read its results.
+  ESP_LOGD(TAG, "Reading BLE tracker results...");
 }
 
 bool OBDComponent::connect_ble() {
