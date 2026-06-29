@@ -99,11 +99,6 @@ CONFIG_SCHEMA = cv.Schema(
 
 async def to_code(config):
     """Create the C++ component from config and generate sensors."""
-    # Add NimBLE-Arduino library dependency
-    cg.add_library("h2zero/NimBLE-Arduino", "2.2.3")
-    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_ADVERTISEMENT=0")
-    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_GAP=1")
-    cg.add_build_flag("-DCONFIG_NIMBLE_CPP_ENABLE_GATT_CLIENT=1")
 
     # Create the main component
     var = cg.new_Pvariable(config[CONF_ID])
