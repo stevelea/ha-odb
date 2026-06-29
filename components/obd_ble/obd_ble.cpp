@@ -248,7 +248,9 @@ bool OBDComponent::connect_ble() {
   scan->setActiveScan(true);
   scan->setInterval(80);
   scan->setWindow(80);
-  NimBLEScanResults results = scan->start(15, nullptr, false);  // blocking 15s
+  scan->start(15000, false, true);        // 15s, not continue, restart
+  delay(15200);                            // wait for scan to finish
+  NimBLEScanResults results = scan->getResults();
 
   ESP_LOGI(TAG, "Scan complete: %d device(s) found", results.getCount());
 
@@ -277,7 +279,7 @@ bool OBDComponent::connect_ble() {
   }
 
   // Restart ESPHome's continuous scan
-  scan->start(0, nullptr, false);  // continuous scan with default params
+  scan->start(0, true, true);  // resume continuous scan
   delay(50);
 
   if (device == nullptr) {
