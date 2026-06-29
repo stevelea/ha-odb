@@ -27,7 +27,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 
-DEPENDENCIES = ["esp32"]
+DEPENDENCIES = ["esp32", "esp32_ble_tracker"]
 AUTO_LOAD = ["sensor"]
 
 obd_ble_ns = cg.esphome_ns.namespace("obd_ble")
