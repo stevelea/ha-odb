@@ -1,0 +1,41 @@
+{
+  "domain": "ha_odb",
+  "name": "OBD-II BLE",
+  "bluetooth": [
+    {
+      "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb",
+      "connectable": true
+    },
+    {
+      "service_uuid": "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+      "connectable": true
+    },
+    {
+      "local_name": "VEEPEAK*"
+    },
+    {
+      "local_name": "IOS-Vlink*"
+    },
+    {
+      "local_name": "V-LINK*"
+    },
+    {
+      "local_name": "Vgate*"
+    },
+    {
+      "local_name": "OBDII*"
+    },
+    {
+      "local_name": "OBD*"
+    },
+    {
+      "local_name": "BLE*"
+    }
+  ],
+  "codeowners": ["@stevelea"],
+  "config_flow": true,
+  "dependencies": ["bluetooth"],
+  "after_dependencies": ["bluetooth_adapters"],
+  "iot_class": "local_polling",
+  "version": "0.1.1"
+}

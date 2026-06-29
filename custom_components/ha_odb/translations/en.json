@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "OBD-II BLE Adapter",
+        "description": "Select your OBD-II Bluetooth LE adapter from the discovered devices below. If it doesn't appear, make sure it's powered on and select \u201cEnter address manually\u201d.",
+        "data": {
+          "device_select": "Discovered devices",
+          "vehicle_profile": "Vehicle Profile"
+        }
+      },
+      "manual": {
+        "title": "OBD-II BLE Adapter \u2014 Manual Entry",
+        "description": "{hint}",
+        "data": {
+          "manual_address": "BLE MAC Address (XX:XX:XX:XX:XX:XX)",
+          "vehicle_profile": "Vehicle Profile"
+        }
+      }
+    },
+    "error": {
+      "invalid_mac_address": "Invalid MAC address format. Use XX:XX:XX:XX:XX:XX.",
+      "cannot_connect": "Failed to connect to the OBD-II adapter. Ensure it is powered on and in range of a Bluetooth proxy.",
+      "no_device_selected": "Please select a device from the list."
+    },
+    "abort": {
+      "already_configured": "This OBD-II adapter is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "OBD-II Options",
+        "data": {
+          "poll_interval": "Poll interval (seconds)"
+        }
+      }
+    }
+  }
+}

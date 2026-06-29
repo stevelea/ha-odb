@@ -1,0 +1,74 @@
+# ESPHome OBD-II BLE Bridge — Example Configuration
+#
+# Connects to a Veepeak OBDCheck BLE adapter via ESP32 and publishes
+# OBD-II PID data as ESPHome sensors. Home Assistant auto-discovers them.
+#
+# How to use:
+# 1. Edit the WiFi and MQTT settings below
+# 2. Set your OBD adapter's MAC address
+# 3. Run: esphome run esp32-obd-bridge.yaml
+#
+# This config includes both the OBD bridge AND MQTT for HA auto-discovery.
+
+esphome:
+  name: esp32-obd-bridge
+  friendly_name: "OBD Bridge"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+# ── External component: OBD BLE client ─────────────────────────────────
+external_components:
+  - source: github://stevelea/ha-odb@main
+    components: [obd_ble]
+    refresh: 0s
+
+# ── WiFi ───────────────────────────────────────────────────────────────
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "OBD-Bridge-Fallback"
+    password: "config1234"
+
+# ── MQTT (for Home Assistant auto-discovery) ───────────────────────────
+mqtt:
+  broker: 192.168.1.88
+  port: 1883
+  username: !secret mqtt_user
+  password: !secret mqtt_password
+  discovery: true
+  discovery_prefix: homeassistant
+  discovery_retain: true
+
+# ── Logging ────────────────────────────────────────────────────────────
+logger:
+  level: DEBUG
+  baud_rate: 0  # Disable serial logging (use MQTT)
+
+# ── OTA updates ────────────────────────────────────────────────────────
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# ── Web server for diagnostics ─────────────────────────────────────────
+web_server:
+  port: 80
+
+# ── The OBD-II BLE client ──────────────────────────────────────────────
+# This component handles all the BLE connection, ELM327 protocol,
+# PID polling, and creates sensors automatically.
+obd_ble:
+  mac_address: "8C:DE:52:DE:FA:CF"
+  profile: xpeng_g6        # "xpeng_g6" or "sae"
+  update_interval: 30s     # How often to poll all PIDs
+
+# ── Uptime / diagnostics ───────────────────────────────────────────────
+sensor:
+  - platform: uptime
+    name: "OBD Bridge Uptime"
+  - platform: wifi_signal
+    name: "OBD Bridge WiFi Signal"
+    update_interval: 60s
