@@ -80,10 +80,8 @@ bool OBDComponent::check_tracker(){
   NimBLEScan* scan=NimBLEDevice::getScan();
   scan->stop();delay(50);
   scan->setActiveScan(true);scan->setInterval(80);scan->setWindow(80);
-  scan->start(5,false,true);  // 5-second scan
-  delay(5200);                 // wait for completion
-  NimBLEScanResults r=scan->getResults();
-  scan->start(0,true,true);   // resume continuous scan
+  NimBLEScanResults r=scan->start(5,false);  // 5s blocking scan, returns results
+  scan->start(0,true);                       // resume continuous scan
   ESP_LOGI(TAG,"Scan: %d device(s)",r.getCount());
 
   for(int i=0;i<r.getCount();i++){
