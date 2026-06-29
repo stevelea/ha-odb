@@ -132,13 +132,13 @@ void startWiFiAP() {
 }
 
 bool connectWiFi() {
-    const char* ssid = Settings.WiFi.getSSID();
-    const char* pass = Settings.WiFi.getPassword();
-    if (!ssid || strlen(ssid) == 0) return false;
+    String ssid = Settings.WiFi.getSSID();
+    String pass = Settings.WiFi.getPassword();
+    if (ssid.isEmpty()) return false;
 
-    DEBUG_PORT.printf("Connecting to WiFi: %s...", ssid);
+    DEBUG_PORT.printf("Connecting to WiFi: %s...", ssid.c_str());
     WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid, pass);
+    WiFi.begin(ssid.c_str(), pass.c_str());
 
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 30) {
@@ -218,9 +218,6 @@ void startHttpServer() {
         delay(500);
         ESP.restart();
     });
-
-    server.init(LittleFS);
-    server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET,PUT,POST");
