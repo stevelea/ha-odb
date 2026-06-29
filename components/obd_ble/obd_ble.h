@@ -28,6 +28,7 @@ struct OBDPidDef {
 // ── Polling state machine ─────────────────────────────────────────────
 enum class PollState {
   IDLE,
+  SCANNING,
   CONNECTING,
   DISCOVERING,
   INIT_ELM,
@@ -57,6 +58,7 @@ class OBDComponent : public PollingComponent {
   float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
  protected:
+  void start_scan();
   bool connect_ble();
   void discover_services();
   bool send_at_command(const std::string& cmd);

@@ -125,17 +125,21 @@ void OBDComponent::loop() {
   switch (state_) {
     case PollState::IDLE:
       if (client_ == nullptr || !client_->isConnected()) {
-        state_ = PollState::CONNECTING;
+        ESP_LOGI(TAG, "Starting BLE scan...");
+        start_scan();
+        state_ = PollState::SCANNING;
         state_start_ms_ = now;
       }
       break;
 
-    case PollState::CONNECTING:
-      if (now - state_start_ms_ > 5000) {
+    case PollState::SCANNING:
+      // Check if the 15s scan has completed (non-blocking)
+      if (now - state_start_ms_ > 16000 || !NimBLEDevice::getScan()->isScanning()) {
         if (connect_ble()) {
           state_ = PollState::DISCOVERING;
         } else {
-          ESP_LOGW(TAG, "Connection failed, retry in %dms", RECONNECT_DELAY_MS);
+          ESP_LOGW(TAG, "Device not found, retry in %dms", RECONNECT_DELAY_MS);
+          state_ = PollState::IDLE;
           state_start_ms_ = now;
         }
       }
@@ -236,23 +240,22 @@ void OBDComponent::loop() {
 
 // ── BLE connection (NimBLE-Arduino 2.2.3 API) ─────────────────────────
 
-bool OBDComponent::connect_ble() {
-  ESP_LOGI(TAG, "Scanning for %s...", mac_address_.c_str());
-
-  // Stop ESPHome's continuous scan temporarily so we can run our own
+void OBDComponent::start_scan() {
+  // Stop ESPHome's continuous scan and start a dedicated 15s active scan
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->stop();
-  delay(100);
-
-  // Start a dedicated 15-second active scan
+  delay(50);
   scan->setActiveScan(true);
   scan->setInterval(80);
   scan->setWindow(80);
-  scan->start(15000, false, true);        // 15s, not continue, restart
-  delay(15200);                            // wait for scan to finish
-  NimBLEScanResults results = scan->getResults();
+  scan->start(15000, false, true);  // 15s, non-continuing
+}
 
-  ESP_LOGI(TAG, "Scan complete: %d device(s) found", results.getCount());
+bool OBDComponent::connect_ble() {
+  // Process already-completed scan results (non-blocking)
+  NimBLEScanResults results = NimBLEDevice::getScan()->getResults();
+
+  ESP_LOGI(TAG, "Processing scan: %d device(s) found", results.getCount());
 
   // Normalise MAC: strip colons, lowercase for comparison
   std::string target_mac = mac_address_;
@@ -278,8 +281,8 @@ bool OBDComponent::connect_ble() {
     device = nullptr;
   }
 
-  // Restart ESPHome's continuous scan
-  scan->start(0, true, true);  // resume continuous scan
+  // Resume ESPHome's continuous scan
+  NimBLEDevice::getScan()->start(0, true, true);
   delay(50);
 
   if (device == nullptr) {
