@@ -72,7 +72,7 @@ static std::vector<int> hex_to_bytes(const std::string& h) {
 
 void OBDComponent::setup() {
   ESP_LOGI(TAG,"OBD: MAC=%s profile=%s",mac_address_.c_str(),profile_.c_str());
-  NimBLEDevice::init("esp32-obd");
+  // No NimBLEDevice::init() — esp32_ble_tracker already initializes NimBLE
   if(profile_=="xpeng_g6"){
     for(int i=0;i<G6_BMS_C;i++)pids_.push_back(G6_BMS[i]);
     for(int i=0;i<G6_VCU_C;i++)pids_.push_back(G6_VCU[i]);
