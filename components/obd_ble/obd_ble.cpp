@@ -75,8 +75,8 @@ void OBDComponent::gattc_event_handler(esp_gattc_cb_event_t event,esp_gatt_if_t 
       {
         // Find write characteristic handle
         auto* chr=ble_client_->get_characteristic(
-          esphome::esp32_ble::ESPBTUUID(WRITE_CHAR_UUID),
-          esphome::esp32_ble::ESPBTUUID("0000fff0-0000-1000-8000-00805f9b34fb"));
+          esphome::esp32_ble::ESPBTUUID::from_uint16(0xFFF1),
+          esphome::esp32_ble::ESPBTUUID::from_uint16(0xFFF0));
         if(chr){write_handle_=chr->handle;ESP_LOGI(TAG,"Write handle: %d",write_handle_);}
         else{ESP_LOGW(TAG,"Write char not found");}
       }
