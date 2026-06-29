@@ -133,8 +133,8 @@ void OBDComponent::loop() {
       break;
 
     case PollState::SCANNING:
-      // Check if the 15s scan has completed (non-blocking)
-      if (now - state_start_ms_ > 16000 || !NimBLEDevice::getScan()->isScanning()) {
+      // Check ESPHome's BLE tracker results every 5 seconds
+      if (now - state_start_ms_ > 5000) {
         if (connect_ble()) {
           state_ = PollState::DISCOVERING;
         } else {
@@ -241,18 +241,13 @@ void OBDComponent::loop() {
 // ── BLE connection (NimBLE-Arduino 2.2.3 API) ─────────────────────────
 
 void OBDComponent::start_scan() {
-  // Stop ESPHome's continuous scan and start a dedicated 15s active scan
-  NimBLEScan* scan = NimBLEDevice::getScan();
-  scan->stop();
-  delay(50);
-  scan->setActiveScan(true);
-  scan->setInterval(80);
-  scan->setWindow(80);
-  scan->start(15000, false, true);  // 15s, non-continuing
+  // Don't fight ESPHome's continuous scan — just let it run.
+  // We'll check results on next SCANNING tick.
+  ESP_LOGD(TAG, "Waiting for BLE tracker results...");
 }
 
 bool OBDComponent::connect_ble() {
-  // Process already-completed scan results (non-blocking)
+  // Check ESPHome's continuous BLE scan results (non-blocking)
   NimBLEScanResults results = NimBLEDevice::getScan()->getResults();
 
   ESP_LOGI(TAG, "Scan results: %d device(s) found", results.getCount());
@@ -287,10 +282,6 @@ bool OBDComponent::connect_ble() {
     }
     device = nullptr;
   }
-
-  // Resume ESPHome's continuous scan
-  NimBLEDevice::getScan()->start(0, true, true);
-  delay(50);
 
   if (device == nullptr) {
     ESP_LOGW(TAG, "Device %s not found in scan results", mac_address_.c_str());
