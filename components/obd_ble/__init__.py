@@ -114,10 +114,14 @@ async def to_code(config):
     cg.add(var.set_mac_address(cg.RawExpression(f'"{mac_clean}"')))
     cg.add(var.set_profile(config[CONF_PROFILE]))
 
-    # Create sensors from PID definitions via raw codegen (avoids new_sensor API issues)
+    # Create sensors from PID definitions via raw codegen
+    sensor_type = cg.esphome_ns.namespace("sensor").class_("Sensor")
+    from esphome.core import ID
+
     if config[CONF_PROFILE] == "xpeng_g6":
         for i, (name, unit, dev_cls, state_cls, icon) in enumerate(G6_PIDS):
-            sens = cg.new_Pvariable(cg.esphome_ns.namespace("sensor").class_("Sensor"))
+            sid = ID(f"obd_sensor_{i}", is_declaration=True, type=sensor_type)
+            sens = cg.Pvariable(sid)
             cg.add(cg.App.register_component(sens))
             cg.add(sens.set_name(f"obd_{name}"))
             if unit:
