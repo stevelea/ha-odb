@@ -15,28 +15,33 @@ Example usage:
       update_interval: 30s
 """
 
+import re
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import sensor, text_sensor
-from esphome.const import (
-    CONF_ID,
-    CONF_MAC_ADDRESS,
-    CONF_PROFILE,
-    CONF_UPDATE_INTERVAL,
-)
+from esphome.const import CONF_ID
 
 DEPENDENCIES = ["esp32"]
-AUTO_LOAD = ["sensor", "text_sensor"]
+AUTO_LOAD = ["sensor"]
 
 obd_ble_ns = cg.esphome_ns.namespace("obd_ble")
 OBDComponent = obd_ble_ns.class_("OBDComponent", cg.PollingComponent)
 
+
+def _validate_mac(value):
+    """Validate a BLE MAC address like 8C:DE:52:DE:FA:CF or 8c:de:52:de:fa:cf."""
+    value = cv.string(value)
+    if not re.match(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", value):
+        raise cv.Invalid(f"Invalid MAC address: {value}")
+    return value
+
+
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(OBDComponent),
-        cv.Required("mac_address"): cv.mac_address,
-        cv.Optional(CONF_PROFILE, default="xpeng_g6"): cv.one_of("sae", "xpeng_g6"),
-        cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): cv.positive_time_period_milliseconds,
+        cv.Required("mac_address"): _validate_mac,
+        cv.Optional("profile", default="xpeng_g6"): cv.one_of("sae", "xpeng_g6"),
+        cv.Optional("update_interval", default="30s"): cv.positive_time_period_milliseconds,
     }
 ).extend(cv.polling_component_schema("30s"))
 
@@ -46,8 +51,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    cg.add(var.set_mac_address(config["mac_address"].as_hex()))
-    cg.add(var.set_profile(config[CONF_PROFILE]))
-
-    # Create sensors are done in C++ setup() based on profile PIDs
-    # Sensor creation is handled via the component's internal sensor registry
+    # Convert MAC to hex bytes string (without colons) for C++
+    mac_clean = config["mac_address"].replace(":", "").replace("-", "").lower()
+    cg.add(var.set_mac_address(cg.RawExpression(f'"{mac_clean}"')))
+    cg.add(var.set_profile(config["profile"]))
